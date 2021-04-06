@@ -13,5 +13,5 @@ Run dptcfw.py
 
 Please change the "kk" values for different datasets. Since "kk" represents "tua" in paper, it is a selected constant.
  
- 
+ DPMC.py is the compared method 
  
