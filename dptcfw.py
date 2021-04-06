@@ -353,7 +353,7 @@ belta = 10
 tt=[]
 for ep in eplison:
     #start=datetime.datetime.now()
-    sigma=2*L*np.sqrt(2*T*np.log10(1/delta))/(ep*1000)
+    sigma=2*L*np.sqrt(2*T*np.log10(1/delta))/(ep)
     print 'sigma:',sigma
     #print '1:',np.power(L,2)
     vv=np.zeros((n,n,k))
