@@ -333,7 +333,8 @@ for nsi in range(n_serve):
     Xomega[:,:,nsi],datainput[:,:,nsi]=Omegamatrix(data[:,:,nsi],int(samplenumber))
 
 (m,n,k)=np.shape(datainput)
-kk=200
+#kk can be changed
+kk=200 
 L =float(maxnorm(datainput))
 #print 'data',datainput[:,:,1]
 print 'L',L
@@ -341,13 +342,13 @@ print 'L',L
 
 #------------------------------glocal-----
 di=[]
-delta=1.0/np.power(10,4)
-eplison=[1]
-# eplison=[0.1,1.0,2.0,5.0,12.0]
+delta=1.0/np.power(10,6)
+#eplison=[1]
+eplison=[0.1,1.0,2.0,5.0,12.0]
 #_sample=5000
 #n_feature=40
 #Ti=[i for i in range(5,20,10)]
-T = 5
+T = 20
 belta = 10
 tt=[]
 for ep in eplison:
