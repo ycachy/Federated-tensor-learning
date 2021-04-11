@@ -1,15 +1,188 @@
-import numpy as np
-#import tensorflow as tf
-from t_prod import t_prod_me
 import math
-#import numpy as np
-from numpy import linalg as la
+import json
+import numpy as np
+from numpy import random
+import dealdate
+# from numpy import linalg as la
+from scipy import linalg as la
 from scipy.fftpack import fft,ifft
-import datetime
+import federated
+#import function
+from scipy.fftpack import fft, ifft
+import numpy as np
+import argparse
+from numpy import linalg as la
+from sklearn.metrics import mean_squared_error
 
-def linsearch(X,D,S,Xome,T):
-    a=np.power(np.linalg.norm(Xome*(X-S),ord=2),2)
-    b=2*np.sum((Xome*(X-D))*(Xome*(S-X)))
+def svd_econ(A):
+    m, n = A.shape
+    U, S, V = la.svd(A)
+    V = V.T
+    if m < n:
+        V = V[:, 0:m]
+    else:
+        U = U[:,0:n]
+    return U, S, V
+
+
+def prox_tnn(Y, rho):
+    tnn=0
+    trank=0
+    #rho=int(rho)
+    n3, n1, n2 = Y.shape
+    X = np.zeros((n3, n1, n2),dtype=np.complex128)
+    Y = fft(Y,axis=0)
+    tnn = 0
+    trank = -1
+   # print 'y',Y[0,:,:].shape
+    U, S, V = svd_econ(Y[0,:, :])
+   # print 'u',U.shape
+   # print 's',S.shape
+   # print 'v', V.shape
+    r = -1
+    for i in range(min(n1, n2)):
+        if S[i] > rho:
+            r = i
+    if r >= 0:
+        S = S[0:r + 1] - rho
+
+    # first frontal slice
+        X[0,:, :] = np.dot(np.dot(U[:, 0:r + 1], np.diag(S)), V[:, 0:r + 1].T)
+        tnn = tnn + S.sum()
+        trank = max(trank, r)
+
+    if n3 % 2 == 0:
+        halfn3 = n3 / 2
+    else:
+        halfn3 = (n3 + 1) / 2
+    for i in range(1, halfn3):
+        U, S, V = svd_econ(Y[i,:, :])
+        r = -1
+        for j in range(min(n1, n2)):
+            if S[j] > rho:
+                r = j
+        if r >= 0:
+            S = S[0:r + 1] - rho
+            X[i,:, :] = np.dot(np.dot(U[:, 0:r + 1], np.diag(S)), V[:, 0:r + 1].T)
+            tnn = tnn + S.sum() * 2
+            trank = max(trank, r)
+        X[n3 - i,:, :] = np.conj(X[i,:, :])
+
+    if n3 % 2 == 0:
+        U, S, V = svd_econ(Y[halfn3,:, :])
+        r = -1
+        for ii in range(min(n1, n2)):
+            if S[ii] > rho:
+                r = ii
+        if r >= 0:
+            S = S[0:r + 1] - rho
+            X[ halfn3,:, :] = np.dot(np.dot(U[:, 0:r + 1], np.diag(S)), V[:, 0:r + 1].T)
+            tnn = tnn + S.sum()
+            trank = max(trank, r)
+
+    tnn = tnn / n3
+    X = ifft(X,axis=0)
+   # print tnn
+    return X, tnn, trank + 1
+
+X_List = []
+V_List = []
+F_List = []
+c_list = []
+Omega_list = []
+Omega_list_tensor = []
+data_predict = None
+PredictWithParameter = []
+
+
+
+def t_prod(A,B):
+    [a3,a1,a2] = A.shape
+    [b3,b1,b2] = B.shape
+    A = fft(A,axis=0)
+    B = fft(B,axis=0)
+    C = np.zeros((b3,a1,b2))
+    for i in range(b3):
+        C[i,:,:] = np.dot(A[i,:,:],B[i,:,:])
+    C = ifft(C,axis=0)
+    return C
+
+def SoftShrink( X, tau):
+    z = np.sign(X) * (abs(X) - tau) * ((abs(X) - tau) > 0)
+
+    return z
+
+def SVDShrink(X, tau):
+        W_bar = np.empty((X.shape[0], X.shape[1], 0), )
+        m,n,k=np.shape(X)
+        D = np.fft.fft(X,axis=0)
+        for i in range(k):
+            if i < k:
+                U, S, V = np.linalg.svd(D[:, :, i], full_matrices=False)
+                S = SoftShrink(S, tau)
+                S = np.diag(S)
+                w = np.dot(np.dot(U, S), V)
+                W_bar = np.append(W_bar, w.reshape(X.shape[0], X.shape[1], 1), axis=2)
+            if i == k:
+                W_bar = np.append(W_bar, (w.conjugate()).reshape(X.shape[0], X.shape[1], 1))
+        return np.fft.ifft(W_bar,axis=0).real
+
+def F_global(X,k,sigma,L,T,J):
+    (k,m,n) = np.shape(X)
+    ListInit(T,k,m,n)
+    C=T/4
+    XX = np.zeros((k, m, n),dtype=np.complex128)
+    XY = np.zeros((k, m, n),dtype=np.complex128)
+    A = np.zeros((k, m, n),dtype=np.complex128)
+    Xomega=np.zeros(X.shape)
+    for iii in range(k):
+        Xomega[iii,:,:]=Pomega(X[iii,:,:])
+    for iii in range(k):
+        Xomega[iii,:,:]=Pomega(X[iii,:,:])
+    for t in range(T+1):
+        temp_v = random.uniform(0, 1)
+        while temp_v == 0:
+            temp_v = random.uniform(0, 1)
+        for i in range(1,k+1):
+            Xt_add1=XX[i-1,:,:]
+            #print Xt_add1
+            A[i-1,:,:]= F_local(i,Xt_add1,t,T,L,Pomega(X[i-1,:,:]))
+        if t <T:
+           # lamdaaaa=5*sum(A.shape)/2
+           # print lamdaaaa
+            XX,TNN,trank=prox_tnn(A,31)
+            #print TNN
+
+def ListInit(T,k,m,n):
+    global X_List,V_List,F_List,c_list,data_predict
+    # X_List.clear()
+    # V_List.clear()
+    # F_List.clear()
+    # c_list.clear()
+    X_List=[]
+    V_List=[]
+    F_List=[]
+    c_list=[]
+    for i in range(k):
+        X_List.append([np.zeros((m,n))]*(T+2))
+        V_List.append([np.zeros((m,n))]*(T+2))
+        F_List.append([np.zeros((m,n))]*(T+2))
+        c_list.append(1)
+    data_predict = np.zeros((k,m, n))
+    for i in range(1,k+1):
+        X0 = np.zeros((m, n))
+        X1 = np.zeros((m, n))
+        X_List[i-1][0] = X0
+        X_List[i-1][1] = X1
+
+        V0 = np.zeros((n, n))
+        V1 = np.zeros((n, n))
+        V_List[i-1][0] = V0
+        V_List[i-1][1] = V1
+
+def linsearch(X,D,S,T):
+    a=np.power(np.linalg.norm((X-S),ord=2),2)
+    b=2*np.sum(((X-D))*((S-X)))
    # print 'b',b
    # print 'a',a
     gamma=1.0/T
@@ -23,464 +196,264 @@ def linsearch(X,D,S,Xome,T):
     #print 'gamma',gamma
     return gamma
 
+
+def F_local(i,Xt_add1,t,T,L,X_observed):
+    global X_List,V_List,F_List,c_list,data_predict
+    (m,n) = np.shape(X_observed)
+
+
+    temp_v = random.uniform(0,1)
+    while temp_v == 0:
+        temp_v = random.uniform(0, 1)
+    X_List[i - 1][t] = Xt_add1
+    Xt=X_List[i-1][t]
+    if t == 0:
+        Xt_sub1 = np.zeros((m, n))
+        Xt_sub1_omega=np.zeros((m, n))
+    else:
+        Xt_sub1=X_List[i-1][t-1]
+    mu = linsearch(Xt_sub1, X_observed, Xt_add1,T)
+    #mu = 0.8
+
+    Z = (1-mu)*Xt_sub1+mu * Xt_add1
+    ZUG =Z
+
+    F_Xt = (la.norm(Pomega(X_List[i-1][t]-X_observed),ord=2)/2)
+    F_List[i-1][t] = F_Xt
+
+    #if t > 1:
+        # if F_List[i-1][t] > F_List[i-1][t-1]:
+        #     c_list[i-1] = 1
+        # else:
+        #     c_list[i-1] = c+1
+    if t == T:
+        data_predict[i-1,:,:] = Xt_add1
+      #  print data_predict[0,:,:]
+        return np.zeros((m, n))
+    else:
+        # return Y-np.dot(UG_tran,X_observed)+E,St_add1
+        return ZUG
+
+
+
 def t_svd(M):
-	[n1 ,n2 ,n3] = M.shape
-	D = np.zeros((n1 ,n2 ,n3), dtype = complex)
-	D = fft(M)
-	Uf = np.zeros((n1,n1,n3), dtype = complex)
-	Thetaf = np.zeros((n1,n2,n3), dtype = complex)
-	Vf = np.zeros((n2,n2,n3), dtype = complex)
+    [n3,n1, n2] = M.shape
+    D = np.zeros((n3,n1, n2))
+    D = fft(M,axis=0)
+    Uf = np.zeros((n3,n1, n1))
+    Thetaf = np.zeros((n3,n1, n2))
+    Vf = np.zeros((n3,n2, n2))
+    tnn=0
+    for i in range(n3):
+        temp_U, temp_Theta, temp_V = la.svd(D[i,:, :], full_matrices=True)
+        Uf[i,:, :] = temp_U
+        Thetaf[i,:n2, :n2,] = np.diag(temp_Theta)
+        tnn=tnn+Thetaf[i,:n2, :n2]
+        Vf[i,:, :] = temp_V
+    U = np.zeros((n3,n1, n1))
+    Theta = np.zeros((n3,n1, n2))
+    V = np.zeros((n3,n2, n2))
+    U = ifft(Uf,axis=0).real
+    Theta = ifft(Thetaf,axis=0).real
+    V = ifft(Vf,axis=0).real
+  #  print tnn
+    return U, Theta, V,tnn
 
-	for i in range(n3):
-		temp_U ,temp_Theta, temp_V = la.svd(D[: ,: ,i], full_matrices=True);
-		Uf[: ,: ,i] = temp_U;
-		Thetaf[:n2, :n2, i] = np.diag(temp_Theta)
-		Vf[:, :, i] = temp_V;
-	U = np.zeros((n1,n1,n3))
-	Theta = np.zeros((n1,n2,n3))
-	V = np.zeros((n2,n2,n3))
-	U = ifft(Uf).real
-	Theta = ifft(Thetaf).real
-	V = ifft(Vf).real
-	return U, Theta, V
+def t_svd_me(M):
+    [k, m, n] = M.shape
+    D = np.zeros((k, m, n))
+    D = fft(M,axis=0)
+    Uf = np.zeros((k, m, m))
+    Thetaf = np.zeros((k, m, n))
+    Vf = np.zeros((k, n, n))
+    for i in range(k):
+        temp_U, temp_Theta, temp_V = la.svd(D[i, :, :])
+        Uf[i, :, :] = temp_U
+        Thetaf[i, :n, :n] = np.diag(temp_Theta)
+        Vf[i, :, :] = temp_V
+    U = ifft(Uf,axis=0).real
+    Theta = ifft(Thetaf,axis=0).real
+    V = ifft(Vf,axis=0).real
+    return U, Theta, V
 
-#def Omegamatrix(Xx,samplenum):
-#    (m,n,k)=np.shape(Xx)
- #   X=np.zeros((m,n,k))
- ##   Result = np.zeros((m, n, k))
-    # = np.zeros(n)
-  #  count=0
- #   for i in range(k):
- #       while(count<samplenum):
-  #          locx = np.random.randint(m)
-   #         locy=np.random.randint(n)
-  #          X[locx][locy][i]=1
-    #        Result[locx][locy][i]=Xx[locx][locy][i]
-    #        count=count+1
-   # return X,Result
 
-def Omegamatrix(Xx,samplenum):
-    (m,n)=np.shape(Xx)
-    X=np.zeros((m,n))
-    # = np.zeros(n)
-    for i in range(m):
-        loc=np.random.randint(n,size=samplenum)
-       # print loc
-        for j in loc:
-            X[i][j]=1
-    Result=X*Xx
-    return X,Result
+
+#
+def Judge_epsilon_delta(e,d):
+    if e <= 2*math.log((1/d),10):
+        return 1
+    else:
+        return 0
+
+
+
+def BoundPomege(X):
+    L_bound = 0
+    (k,m,n) = np.shape(X)
+    for i in range(k):
+        #X_P = Pomega(X[i,:,:])
+        X_P = X[i, :, :]
+        L = la.norm(X_P,ord=2)
+        L_bound = max(L,L_bound)
+    return L_bound
 
 def dataprocess(X):
-    (m, n,k) = np.shape(X)
+    (k, m, n) = np.shape(X)
     for j in range(k):
         for i in range(m):
-            mean=sum(X[i,:,j])/len(X[i,:,j])
-            X[i,:,j]=X[i,:,j]-mean
+            mean=sum(X[j,i,:])/len(X[j,i,:])
+            X[j,i,:]=X[j,i,:]-mean
     return X
+
+
+
+
+
+
+
+
+def Pomega(matrix):
+    global Omega_list
+    m,n = np.shape(matrix)
+    X_P = np.zeros((m,n))
+    for index in Omega_list:
+        i,j = index
+        X_P[i,j] = matrix[i,j]
+    return X_P
+
+def Pomegaentire(tensor):
+    global Omega_list
+    (m,n) = np.shape(matrix)
+    X_P = np.zeros((m,n))
+    for index in Omega_list:
+        i,j = index
+        X_P[i,j] = matrix[i,j]
+    return X_P
 
 def rmse(target,prediction):
     error = []
-    (m,n,k)=np.shape(target)
-    for i in range(m):
-        for j in range(n):
-            for jj in range(k):
+    (k,m,n)=np.shape(target)
+    for i in range(k):
+        for j in range(m):
+            for jj in range(n):
                 error.append(target[i][j][jj] - prediction[i][j][jj])
     squaredError = []
     absError = []
     for val in error:
         squaredError.append(val * val)
         absError.append(abs(val))
-    #print len(squaredError)
-    rm=np.sqrt(sum(squaredError) / (m*n*k))
-   # print sum(squaredError)
+    rm=np.sqrt(sum(squaredError)/(m*n*k))
     return rm
 
-def maxnorm(YY):
-    (m,n,k)=np.shape(YY)
+def GetGlobalOmega(m,n,per):
+    global Omega_list
+    Omega_list = []
+    num = int(m*n*per)
+    for tt in range(num):
+        i = random.randint(0,m)
+        j = random.randint(0,n)
+        while [i,j] in Omega_list:
+            i = random.randint(0,m)
+            j = random.randint(0,n)
+        Omega_list.append([i,j])
 
-    maxx=0
+def rmsenew(target,predict):
+    (k,m,n)=target.shape
+    error=[0]*k
+    total=[0]*k
     for i in range(k):
-        temp=np.linalg.norm(YY[:,:,i],ord=2)
-        if maxx<temp:
-            maxx=temp
-    return maxx
+        #  print data_predict[i,:,:]
+        error[i] = np.power(la.norm(target[i, :, :] - predict[i, :, :]), 2)
+        total[i] = np.power(la.norm(target[i, :, :]), 2)
+    error_T = sum(error) / sum(total)
+    return error_T
 
+def JsonFileSave(Data,filename):
+    path = 'C:/Users/ChenKx/Desktop/federated/' + filename
+    file = open(path, "w+")
+    file.writelines(Data)
+    file.close()
 
-def update(Ome,n,k,v,lambda1,t,L,Yi,Di,gamma,dx):
-    YA = np.zeros((m,n))
-    Ai = np.zeros((m,n))
-    AN=np.zeros((n,n))
-    if t==0:
-        Yiii=np.zeros((m,n))
-    else:
-        Yiii=Yi
-    Ai=(Yiii-Di)*Ome
-    #print 'Ai',Di
-   # u=np.dot(np.dot(Ai,v),lambda1)
-    u=(np.dot(Ai,v))*(1.0/lambda1)
-    uu=[]
-    uu.append(u)
-    vv=[]
-    vv.append(v)
-    #print 'u',u
-    #print uu.shape,'u'
-    #print vv.shape,'v'
-    #(1.0 / lambda1)
-    #    print 'yiii',Yiiik*np.sqrt(dx)*
-    Si=(k)*np.sqrt(dx)*np.dot(u,np.transpose(v))
-    #print 'si',Si.shape
-    gamma = linsearch(Yi, Di,Si,Ome,T )
-    #print np.dot(u,np.transpose(v))
-    Yite=(1.0-gamma)*Yiii-(k*gamma*np.sqrt(dx))*np.dot(u,np.transpose(v))
+def JsonFileLoad(filename):
+    DataLoad = []
+    path = 'C:/Users/ChenKx/Desktop/federated/' + filename
+    file = open(path, "r")
+    lines = file.readlines()
+    for line in lines:
+        DataLoad.append(json.loads(line))
+    file.close()
+    return DataLoad
 
-   # print 'yite;', np.dot(np.transpose(uu),vv)
-    if np.linalg.norm(Yite*Ome,ord=2)!=0:
-        if L/np.linalg.norm(Yite*Ome,ord=2)<1 :
-            YA=(L/np.linalg.norm(Yite*Ome,ord=2))*Yite
+def DealFile(filename):
+    path = 'C:/Users/ChenKx/Desktop/' + filename
+    file = open(path, "r")
+    file_w = open('C:/Users/ChenKx/Desktop/Federate_learn_predict/matrix_graph_adjacent_unique_0.json',"w")
+    line = file.readline()
+    Dataload = line.split('}{')
+    for i in range(len(Dataload)):
+        if i == 0:
+            Dataload[i] = Dataload[i] + '}\n'
+        elif i == len(Dataload)-1:
+            Dataload[i] = '{' + Dataload[i] + '\n'
         else:
-            YA=Yite
-    #YA=Yite
-    Ai=(YA-Di)*Ome
-   # print 'Ai:',Ai
-    #Aii = []
-    #Aii.append(Ai)i
-    if t!=0:
-       # Aii = []
-       # Aii.append(Ai)
-        #print Aii
-        AN=np.dot(np.transpose(Ai),Ai)
-    else:
-        AN = np.dot(np.transpose(Ai), Ai)
-   # print 'An:',AN.shape
-    return YA,AN
-#-------smart city data----
-#path='ratings.txt'
-#file=open(path,'r')
-#useid=[]
-#itemid=[]
-#ratings=[]
-#contextid=[]
-#lines=file.readlines()
-#for i in lines:
-#    itemp=i.strip('\n').strip(' ').split(';')
- #   contextid.append(int(itemp[0]))
- #   itemid.append(int(itemp[1]))
-  #  ratings.append(int(itemp[2]))
-  #  useid.append(int(itemp[3]))
-#itemmax=np.max(itemid)
-#usemax=np.max(useid)
-#contextmax=np.max(contextid)
-#tensormat=np.zeros((usemax,itemmax,contextmax))
-#print itemmax,usemax,contextmax
-#for i in range(len(useid)):
- #       tensormat[useid[i]-1][itemid[i]-1][contextid[i]-1]=ratings[i]
+            Dataload[i] = '{' + Dataload[i] + '}\n'
+    file_w.writelines(Dataload)
+    file.close()
+    file_w.close()
 
- #----------moive data------
-#import io
-#import numpy as np
-#import time
-#import csv
+if __name__ == "__main__":
+    # JsonFileLoad('tensor_graph_adjacent_unique_1.json')
+    # exit(0)
+    DataSave = []
+    IterData = {'Para':[],'Error':0.0}
+    #epsilon = [0.1,0.2,0.5,1,2,5,6]
+    epsilon = [0.1]
+    delta = pow(10,-6)
+    #omega_percent = [n for n in np.arange(0.1, 1.1, 0.1)]
+    omega_percent=[0.5]
+    T_list = [n for n in range(0,1000,10)]
+    #T_list=[200]
+    m = 200
+    n =200
+    k = 20
+    r = 1
 
-#path = 'C:/Users/ChenKx/Desktop/movie/ratings.csv'
-#path1 = 'C:/Users/ChenKx/Desktop\movie/tags.csv'
-#file = open(path)
-#file1 = open(path1)
-#useid = []
-#movieid = []
-#ratings = []
-#tagid = []
-#csv_reader = csv.reader(file)
-#csv_reader1 = csv.reader(file1)
-#inu = 0
-#for row in csv_reader:
- #   # itemp=row.strip('\n').strip(' ').split(';')
-#    if inu != 0:
- #       itemp = row
-  #      # print row
-  #      if int(itemp[1]) < 1000:
-  #          useid.append(int(itemp[0]))
-   #         movieid.append(int(itemp[1]))
-   #         ratings.append(float(itemp[2]))
-   #         # print time.localtime(int(itemp[3]))[0]
-   #         tagid.append(int(time.localtime(int(itemp[3]))[0]))
-  #  inu = inu + 1
-  #  # useid.append(int(itemp[3]))
-#moviemax = np.max(movieid)
-#usemax = np.max(useid)
-#tagmax = np.max(tagid) - np.min(tagid)
-## contextmax=np.max(contextid)
-#print moviemax, usemax, tagmax
-#tensormat = np.zeros((usemax, moviemax, tagmax))
+    lam=max(max(m,n),k)/min(min(m,n),k)
 
-#for i in range(len(useid)):
- #   tensormat[useid[i] - 1][movieid[i] - 1][tagid[i] - np.min(tagid) - 1] = ratings[i]
-##print len(np.nonzero(tensormat)[0])
-#data=tensormat
+    mini_error = 100000
+    missing_rate = 0.2
+    sparsity = 0.3
 
 
-#-------music-----
-#import numpy as np
-#import csv
-#import io
-#path='C:/Users/ChenKx/Desktop/music/artists.csv'
-#file = open(path)
-#csv_reader = csv.reader(file)
-#artist=[]
-#country=[]
-#tag=[]
-#ratings1=[]
-#ratings2=[]
-#i=0
-#for row in csv_reader:
-#    if i!=0 and i<=1000:
-#        if row[1].isalpha():
- #           artist.append(row[1])
-#        country.append(row[3])
-#        for j in row[5].split(';'):
- ##           if all(jj.isalpha() or jj==' ' for jj in j.strip(' ').strip('\n')):
-  #              tag.append(j.strip(' ').strip('\n'))
- #             #  print len(tag)
- #       if row[7]!='':
- #           ratings1.append(int(row[7]))
- #       if row[8]!='':
- #           ratings2.append(int(row[8]))
- #   i=i+1
+    error = [0]*(k)
+    total=[0]*(k)
+    graph= federated.t_prod(np.random.rand(k, m, r), np.random.rand(k, r, n))
+    maxco = 0
+    for iii in range(k):
+        gu, gs, gv = np.linalg.svd(graph[iii, :, :])
+        #if maxco < max(gs):
+        maxco = maxco+max(gs)
+    print 'mc', np.sqrt(float(maxco)/k)
 
-#artist=set(artist)
-#country=set(country)
-#tag=set(tag)
-##print tag
-#artistmax=len(artist)
-#countrymax=len(country)
-#tagmax=len(tag)
-#ratings1max=np.max(ratings1)
-#ratings1min=np.min(ratings1)
-#ratings2max=np.max(ratings2)
-#ratings2min=np.min(ratings2)
-#qujian1=(ratings1max-ratings1min)
-#qujian2=(ratings2max-ratings2min)
-#print qujian1,qujian2
-#i=0
-#aa=np.zeros((artistmax,countrymax,tagmax))
-#print artistmax,countrymax,tagmax
-#file = open(path)
-#csv_reader = csv.reader(file)
-#aii=[]
-#cii=[]
-#tii=[]
-#aaa=[]
-#for row in csv_reader:
-    #print row[1]
-    #print list(artist)
- #   if i!=0 and i<1000:
-      # try:
-           # if row[1].isalpha():
-           #     ai= list(artist).index(row[1])
-         #   ci=list(country).index(row[3])
-         #   aii.append(ai)
-         #   cii.append(ci)
-        #  #  print ai,ci
-       # except ValueError:
-        #    print ''
-      #  if row[7] != '':
-         #   rating1=(int(row[7])-ratings1min)/1000000.0
-       # if row[8] != '':
-       #     rating2=(int(row[8])-ratings2min)/1000000000.0
-     # #  print 'r12',rating1,rating2
-       # for j in row[5].split(';'):
-          # # print j
-           # if j.strip(' ').strip('\n').isalpha():
-              # # print j
-                 #   ti=list(tag).index(j.strip(' ').strip('\n'))
-               #     tii.append(ti)
-             #       #print ti
-            #       # print rating1 + rating2
-       #             aaa.append(rating1 + rating2)
-  #  #print len(np.nonzero(aa))
-  #  i=i+1
-#print len(aii),len(cii),len(tii),len(aaa)
-#for i,j,k in zip(range(len(aii)),range(len(cii)),range(len(tii))):
-  #  #print aii[i],cii[j],tii[k]
-  #  aa[aii[i],cii[j],tii[k]]=int(aaa[k])
+    for e in epsilon:
+        for per in omega_percent:
+            GetGlobalOmega(m, n, per)
+            L = BoundPomege(graph)
+            if Judge_epsilon_delta(e,delta):
+                flag = 0
+                dp_para = [e, delta]
+                for T in T_list:
+                    sigma = np.sqrt((4 *  math.sqrt(2  * math.log((1 / dp_para[1]), 10))) /(dp_para[0]))
+                    IterData['Para'] = [e,delta,per,T]
+                    F_global(graph,k,sigma,L,T,lam)
+                    IterData['Error'] = error_T
+                    PredictWithParameter.append(IterData)
+                    print(IterData)
 
-#data=aa
+    JsonFileSave(DataSave,'tensor_without_noise.json')
+
+    print(PredictWithParameter)
 
 
-            # print country
-
-    #print tag
-
-#--------syntic data-------
-m=200
-n=200
-k=20
-r=1
-
-data=t_prod_me(np.random.rand(m,r,k),np.random.rand(r,n,k))
-
-#data=dataprocess(data)
-#print np.real(data)
-#(du,ds,dv)=t_svd(data)
-#dsmax=np.max(ds)
-#print 'dsmax',dsmax
-(n_sample,n_feature,n_serve)=data.shape
-rate=0.3
-samplenumber=rate*n_feature
-datainput=np.zeros((n_sample,n_feature,n_serve))
-Xomega=np.zeros((n_sample,n_feature,n_serve))
-for nsi in range(n_serve):
-    Xomega[:,:,nsi],datainput[:,:,nsi]=Omegamatrix(data[:,:,nsi],int(samplenumber))
-
-(m,n,k)=np.shape(datainput)
-#kk can be changed
-kk=200 
-L =float(maxnorm(datainput))
-#print 'data',datainput[:,:,1]
-print 'L',L
-#-----------------------------------------
-
-#------------------------------glocal-----
-di=[]
-delta=1.0/np.power(10,6)
-#eplison=[1]
-eplison=[0.1,1.0,2.0,5.0,12.0]
-#_sample=5000
-#n_feature=40
-#Ti=[i for i in range(5,20,10)]
-T = 20
-belta = 10
-tt=[]
-for ep in eplison:
-    #start=datetime.datetime.now()
-    sigma=2*L*np.sqrt(2*T*np.log10(1/delta))/(ep)
-    print 'sigma:',sigma
-    #print '1:',np.power(L,2)
-    vv=np.zeros((n,n,k))
-    #vv=np.zeros((n,n))
-    lamdasqrt=np.zeros((n,n,k))
-    #lamsqrt=np.zeros((n*k,n))
-
-    Y=np.zeros((m,n,k))
-    for t in range(T):
-        #print t
-        #print Y
-        W=np.zeros((n,n,k))
-        #for ii in range(len(lamda)):
-
-        gamma=1.0/T
-
-        dx=np.sqrt(k)
-        #lamdp=math.sqrt(8 * np.power(sigma, 1) * (
-        #np.sum(m + n + k) * np.log10(float(2 * (m + n + k)) / np.log10(3.0 / 2)) + np.log10(2.0 / belta)))
-        #print np.sqrt(lamdp)
-       # print '3:',math.sqrt(sigma*np.log10(float(n)/belta))*math.pow(n,1.0/4)
-        for i in range(k):
-            Di=datainput[:,:,i]
-            #print 'Di',Di
-            Xomegai=Xomega[:,:,i]
-            #lamda=np.zeros((n,n))
-            lamma=1
-            #lamdaindex=lamdasqrt.index(max(lamdasqrt))
-            #lamdaindex=np.where(lamdasqrt[:,:,i]==np.max(lamdasqrt[:,:,i]))
-            #print lamdaindex[1][0]
-           # lamda=np.max(lamdasqrt[:,:,i])
-           # print lamda
-           # if lamda>0:
-           #     lamda=np.sqrt(lamda)
-           # else:
-            #    lamda=np.sqrt(np.abs(lamda))
-            #lamda=np.sqrt(lamda/k+np.sqrt(lamdp))
-          #  print lamda
-            #print lamdasqrt[:,:,i]
-            #for lamtemp in range(n):
-            #    for lamtempj in range(n):
-            #        if lamdasqrt[lamtemp,lamtempj,i]>0:
-            #            lamda[lamtemp][lamtempj]= (np.sqrt(lamdasqrt[lamtemp, lamtempj, i])+lamdp)
-            #        else:
-            #            lamda[lamtemp][lamtempj]=0
-
-            #print 8*np.power(sigma,2)*(np.sum(m+n+k)*np.log10(float(2*(m+n+k))/np.log10(3.0/2))+np.log10(2.0/belta))
-            #print 'lamda',lamda
-#            lamdex=np.where(lamsqrt==np.max(lamsqrt))
-            #print np.max(lamsqrt)
-            #print vv.shape
-            #v=vv
-            #print vv
-            v = np.real(vv[ :,:,i])#[:,lamdaindex[1][0]]
-            #v=np.real(vv[0,i*n:(i+1)*n])
-            #print v
-            #print 'v',v
-            Yii,AN=update(Xomegai, n, kk, v, lamma, t, L, Y[:,:,i], Di, gamma, dx)
-            #Yii,AN=update(Xomegai,n,k,v,lambda1,T,t,L,Y[:,:,i],Di)
-            #print 'Yii',Yii:,
-            #print 'AN',AN
-            Y[:,:,i]=Yii
-            W[:,:,i]=AN
-        for it in range(n):
-            for jt in range(n):
-                for kt in range(k):
-                    W[it][jt][kt]=W[it][jt][kt]+ np.random.normal(0,np.power(sigma,1))
-                #print np.random.normal(0,np.power(sigma,1))
-       # print 'W:',W
-       # Wfold=np.zeros((n*k,n))
-        #for j in range(k):
-        #    for jjj in range(n):
-         #       Wfold[j*n+jjj,:]=W[jjj,:,j]
-        ##print W
-        #uu,lamsqrt,vv=np.linalg.svd(Wfold)
-        uu,lamdasqrt,vv = t_svd(W)
-        lamsum=np.zeros((n,n))
-        for li in range(k):
-            #print lamdasqrt[:,:,li]
-            lamsum =lamsum+lamdasqrt[:,:,li]
-        lamma=np.sqrt(np.max(lamsum)/k)-np.sqrt((n*sigma)/k)*np.power((m+n+k),1/4)
-       # print '1',np.max(lamsum)
-        #print '2',n*sigma
-        #print lamma
-        #end=datetime.datetime.now()
-        #tt.append(end-start)
-       # ui,lami,vi=np.linalg.svd(W[:,:,1])
-        #print 'vi',vi
-        #print 'v0i',vv[:,:,1]
-       # print 'wvv', np.dot(W[:,:,1],vv[:,:,1])
-       # print 'wvi', np.dot(W[:,:,1],vi)
-        #vvv=np.zeros((n,n))
-       # for iiii in range(n):
-        #    for jjjj in range(n):
-         #       vvv[iiii,jjjj]=vv[jjjj,iiii,1]
-    #    print 'tsvd',t_prod(uu,lamdasqrt)*vv[:,:,1]
-      #  print 'w',W[1,1,1]
-       # print np.transpose(W).shape
-        #$WT=np.zeros((n,n,k))
-       # WT[:,:,0]=np.transpose(W[:,:,0])
-      #  for wti in range(k-1):
-       #     WT[:,:,wti+1]=np.transpose(W[:,:,k-(wti+1)])
-       # u1,lamdasqrt1,v1=t_svd(t_prod(WT,W))
-        #print 'vv',vv.all()
-        #print 'v1',v1.all()
-        #if vv.all()==v1.all():
-         #   print 'true'
-        #else:
-        #    print 'false'
-       # print 'n',np.dot(np.dot(uu[:,:,1],lamdasqrt[:,:,1]),np.transpose(vv[:,:,1]))
-        #print 'w',W[:,:,1]
-        #print 'vv',vv
-       # print 'lamdasqrt',lamdasqrt
-       # print vv.shape
 
 
-        #print 'lamdamx:',lamdasqrt[lamdamax]
-
-   # print 'Y:',(Y)[:,:,1]
-   # print 'Y:', (Y*Xomega)[:, :, 1]
-    #Y=np.zeros((m,n,k))
-   # print Y-data
-    di.append(rmse(Y*Xomega,datainput))
-    print di
-#print tt
-#plt.plot(eplison, di, '-r^');
-#plt.xlabel('Epsilon');
-#plt.ylabel('RMSE');
-#plt.grid(color='black',linewidth='0.3',linestyle='--')
-#plt.show()
