@@ -102,7 +102,7 @@ RMSE[0.27344584550830448,0.15274034785738856,0.09381347944083872,0.0420082025493
 
 
 
-# Tips: put the dptcfw.py, dealdata.py, t_prod.py in a "federated" fold, and cahnge the path in dealdata.py
+# Tips: put the dptcfw.py, dealdata.py, t_prod.py in a "federated" fold, and change the path in dealdata.py
 
 
 
