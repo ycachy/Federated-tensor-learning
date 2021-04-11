@@ -1,5 +1,5 @@
 # DPTC
-differentailly private matrix completion and tensor completion
+differentailly private matrix completion and federated tensor completion
 
 ## Differentailly private matrix completion
 
