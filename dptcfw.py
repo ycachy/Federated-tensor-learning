@@ -135,8 +135,8 @@ def F_global(X,k,sigma,L,T,J):
     XY = np.zeros((k, m, n),dtype=np.complex128)
     A = np.zeros((k, m, n),dtype=np.complex128)
     Xomega=np.zeros(X.shape)
-    lam=1000
-    #lam=300-500 if FTC
+    lam=1500
+    #lam=300-500
     for iii in range(k):
         Xomega[iii,:,:]=Pomega(X[iii,:,:])
     for t in range(T+1):
@@ -414,7 +414,8 @@ if __name__ == "__main__":
     delta = pow(10,-6)
     #omega_percent = [n for n in np.arange(0.1, 1.1, 0.1)]
     omega_percent=[0.5]
-    T_list = [n for n in range(0,1000,10)]
+    #T_list = [n for n in range(0,1000,10)] if FTC
+    T_list = [n for n in range(0,20,2)]
     #T_list=[200]
     m = 200
     n =200
