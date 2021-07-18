@@ -2,11 +2,11 @@ import math
 import json
 import numpy as np
 from numpy import random
-import dealdate
+#import dealdate
 # from numpy import linalg as la
 from scipy import linalg as la
 from scipy.fftpack import fft,ifft
-import federated
+#import federated
 #import function
 from scipy.fftpack import fft, ifft
 import numpy as np
@@ -52,9 +52,9 @@ def prox_tnn(Y, rho):
         trank = max(trank, r)
 
     if n3 % 2 == 0:
-        halfn3 = n3 / 2
+        halfn3 = int(n3 / 2)
     else:
-        halfn3 = (n3 + 1) / 2
+        halfn3 = int((n3 + 1) / 2)
     for i in range(1, halfn3):
         U, S, V = svd_econ(Y[i,:, :])
         r = -1
@@ -135,8 +135,8 @@ def F_global(X,k,sigma,L,T,J):
     XY = np.zeros((k, m, n),dtype=np.complex128)
     A = np.zeros((k, m, n),dtype=np.complex128)
     Xomega=np.zeros(X.shape)
-    for iii in range(k):
-        Xomega[iii,:,:]=Pomega(X[iii,:,:])
+    lam=1000
+    #lam=300-500 if FTC
     for iii in range(k):
         Xomega[iii,:,:]=Pomega(X[iii,:,:])
     for t in range(T+1):
@@ -150,9 +150,11 @@ def F_global(X,k,sigma,L,T,J):
         if t <T:
            # lamdaaaa=5*sum(A.shape)/2
            # print lamdaaaa
-            XX,TNN,trank=prox_tnn(A,31)
-            #print TNN
+            E = random.normal(loc=0, scale=sigma, size=(k,m, n))
+            A=A+E
+            XX,TNN,trank=prox_tnn(A,lam)
 
+       
 def ListInit(T,k,m,n):
     global X_List,V_List,F_List,c_list,data_predict
     # X_List.clear()
@@ -185,12 +187,12 @@ def linsearch(X,D,S,T):
     b=2*np.sum(((X-D))*((S-X)))
    # print 'b',b
    # print 'a',a
-    gamma=1.0/T
+    gamma=1.0/(T+1)
     if a!=0:
         if -b/(2*a)<0 or -b/(2*a)==0:
-            gamma=1.0/T
+            gamma=1.0/(T+1)
         elif -b/(2*a)>1:
-            gamma=1.0/T
+            gamma=1.0/(T+1)
         else:
             gamma=-b/(2*a)
     #print 'gamma',gamma
@@ -200,12 +202,12 @@ def linsearch(X,D,S,T):
 def F_local(i,Xt_add1,t,T,L,X_observed):
     global X_List,V_List,F_List,c_list,data_predict
     (m,n) = np.shape(X_observed)
-
-
     temp_v = random.uniform(0,1)
     while temp_v == 0:
         temp_v = random.uniform(0, 1)
+
     X_List[i - 1][t] = Xt_add1
+ 
     Xt=X_List[i-1][t]
     if t == 0:
         Xt_sub1 = np.zeros((m, n))
@@ -213,10 +215,11 @@ def F_local(i,Xt_add1,t,T,L,X_observed):
     else:
         Xt_sub1=X_List[i-1][t-1]
     mu = linsearch(Xt_sub1, X_observed, Xt_add1,T)
-    #mu = 0.8
-
+    #mu=0.8
+ 
     Z = (1-mu)*Xt_sub1+mu * Xt_add1
-    ZUG =Z
+    ZUG=Z-(Pomega(Z)-  X_observed)
+ 
 
     F_Xt = (la.norm(Pomega(X_List[i-1][t]-X_observed),ord=2)/2)
     F_List[i-1][t] = F_Xt
@@ -226,9 +229,9 @@ def F_local(i,Xt_add1,t,T,L,X_observed):
         #     c_list[i-1] = 1
         # else:
         #     c_list[i-1] = c+1
-    if t == T:
+    if t == T-1:
         data_predict[i-1,:,:] = Xt_add1
-      #  print data_predict[0,:,:]
+    
         return np.zeros((m, n))
     else:
         # return Y-np.dot(UG_tran,X_observed)+E,St_add1
@@ -427,13 +430,13 @@ if __name__ == "__main__":
 
     error = [0]*(k)
     total=[0]*(k)
-    graph= federated.t_prod(np.random.rand(k, m, r), np.random.rand(k, r, n))
+    graph= t_prod(np.random.rand(k, m, r), np.random.rand(k, r, n))
     maxco = 0
     for iii in range(k):
         gu, gs, gv = np.linalg.svd(graph[iii, :, :])
         #if maxco < max(gs):
         maxco = maxco+max(gs)
-    print 'mc', np.sqrt(float(maxco)/k)
+   # print 'mc', np.sqrt(float(maxco)/k)
 
     for e in epsilon:
         for per in omega_percent:
@@ -446,6 +449,8 @@ if __name__ == "__main__":
                     sigma = np.sqrt((4 *  math.sqrt(2  * math.log((1 / dp_para[1]), 10))) /(dp_para[0]))
                     IterData['Para'] = [e,delta,per,T]
                     F_global(graph,k,sigma,L,T,lam)
+                    error_T=rmsenew(graph,data_predict)
+                    #print(graph)
                     IterData['Error'] = error_T
                     PredictWithParameter.append(IterData)
                     print(IterData)
@@ -453,7 +458,3 @@ if __name__ == "__main__":
     JsonFileSave(DataSave,'tensor_without_noise.json')
 
     print(PredictWithParameter)
-
-
-
-
